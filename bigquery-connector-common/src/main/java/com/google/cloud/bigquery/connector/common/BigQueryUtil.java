@@ -66,17 +66,8 @@ import java.util.function.IntFunction;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import javax.annotation.Nullable;
 
 public class BigQueryUtil {
-
-  // Numeric is a fixed precision Decimal Type with 38 digits of precision and 9 digits of scale.
-  // See https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#numeric-type
-  public static final int DEFAULT_NUMERIC_PRECISION = 38;
-  public static final int DEFAULT_NUMERIC_SCALE = 9;
-  public static final int DEFAULT_BIG_NUMERIC_PRECISION = 76;
-  public static final int DEFAULT_BIG_NUMERIC_SCALE = 38;
-  private static final int NO_VALUE = -1;
   static final ImmutableSet<String> INTERNAL_ERROR_MESSAGES =
       ImmutableSet.of(
           "HTTP/2 error code: INTERNAL_ERROR",
@@ -329,68 +320,22 @@ public class BigQueryUtil {
     }
 
     return Objects.equal(sourceField.getName(), destinationField.getName())
-        && typeWriteable(sourceField.getType(), destinationField.getType())
+        && Objects.equal(sourceField.getType(), destinationField.getType())
         && (!enableModeCheckForSchemaFields
-            || isModeWritable(
+            || Objects.equal(
                 nullableIfNull(sourceField.getMode()), nullableIfNull(destinationField.getMode())))
         && ((sourceField.getMaxLength() == null && destinationField.getMaxLength() == null)
             || (sourceField.getMaxLength() != null
                 && destinationField.getMaxLength() != null
                 && sourceField.getMaxLength() <= destinationField.getMaxLength()))
-        && ((sourceField.getScale() == destinationField.getScale())
-            || (getScale(sourceField) <= getScale(destinationField)))
-        && ((sourceField.getPrecision() == destinationField.getPrecision())
-            || (getPrecision(sourceField) <= getPrecision(destinationField)));
-  }
-
-  // allowing widening narrow numeric into bignumeric
-  @VisibleForTesting
-  static boolean typeWriteable(LegacySQLTypeName sourceType, LegacySQLTypeName destinationType) {
-    return (sourceType.equals(LegacySQLTypeName.NUMERIC)
-            && destinationType.equals(LegacySQLTypeName.BIGNUMERIC))
-        || sourceType.equals(destinationType);
-  }
-
-  @VisibleForTesting
-  static int getPrecision(Field field) {
-    return getValueOrDefault(
-        field.getPrecision(),
-        field.getType(),
-        DEFAULT_NUMERIC_PRECISION,
-        DEFAULT_BIG_NUMERIC_PRECISION);
-  }
-
-  @VisibleForTesting
-  static int getScale(Field field) {
-    return getValueOrDefault(
-        field.getScale(), field.getType(), DEFAULT_NUMERIC_SCALE, DEFAULT_BIG_NUMERIC_SCALE);
-  }
-
-  private static int getValueOrDefault(
-      Long value, LegacySQLTypeName type, int numericValue, int bigNumericValue) {
-    if (value != null) {
-      return value.intValue();
-    }
-    // scale is null, so use defaults
-    if (LegacySQLTypeName.NUMERIC.equals(type)) {
-      return numericValue;
-    }
-    if (LegacySQLTypeName.BIGNUMERIC.equals(type)) {
-      return bigNumericValue;
-    }
-    return NO_VALUE;
-  }
-
-  @VisibleForTesting
-  static boolean isModeWritable(Field.Mode sourceMode, Field.Mode destinationMode) {
-    switch (destinationMode) {
-      case REPEATED:
-        return sourceMode == Mode.REPEATED;
-      case REQUIRED:
-      case NULLABLE:
-        return sourceMode != Mode.REPEATED;
-    }
-    return false;
+        && ((sourceField.getScale() == null && destinationField.getScale() == null)
+            || (sourceField.getScale() != null
+                && destinationField.getScale() != null
+                && sourceField.getScale() <= destinationField.getScale()))
+        && ((sourceField.getPrecision() == null && destinationField.getPrecision() == null)
+            || (sourceField.getPrecision() != null
+                && destinationField.getPrecision() != null
+                && sourceField.getPrecision() <= destinationField.getPrecision()));
   }
 
   @VisibleForTesting
@@ -401,14 +346,8 @@ public class BigQueryUtil {
     if (sourceFieldList == destinationFieldList) {
       return true;
     }
-
     // if both are null we would have caught it earlier
     if (sourceFieldList == null || destinationFieldList == null) {
-      return false;
-    }
-
-    // cannot write of the source has more fields than the destination table.
-    if (sourceFieldList.size() > destinationFieldList.size()) {
       return false;
     }
 
@@ -418,9 +357,9 @@ public class BigQueryUtil {
         destinationFieldList.stream()
             .collect(Collectors.toMap(Field::getName, Function.identity()));
 
-    for (Map.Entry<String, Field> e : destinationFieldsMap.entrySet()) {
-      Field f1 = sourceFieldsMap.get(e.getKey());
-      Field f2 = e.getValue();
+    for (Map.Entry<String, Field> e : sourceFieldsMap.entrySet()) {
+      Field f1 = e.getValue();
+      Field f2 = destinationFieldsMap.get(e.getKey());
       if (!fieldWritable(f1, f2, enableModeCheckForSchemaFields)) {
         return false;
       }

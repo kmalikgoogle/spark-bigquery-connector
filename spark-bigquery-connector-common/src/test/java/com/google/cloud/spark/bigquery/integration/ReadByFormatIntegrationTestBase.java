@@ -115,9 +115,7 @@ public class ReadByFormatIntegrationTestBase extends SparkBigQueryIntegrationTes
         spark
             .read()
             .format("bigquery")
-            .option("dataset", testDataset.toString())
             .option("table", TestConstants.SHAKESPEARE_TABLE)
-            // .option("table", TestConstants.SHAKESPEARE_TABLE)
             .option("readDataFormat", dataFormat)
             .load()
             .select("word_count", "word", "corpus", "corpus_date")
