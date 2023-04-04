@@ -40,7 +40,7 @@ import com.google.cloud.bigquery.storage.v1.ReadSession;
 import com.google.cloud.bigquery.storage.v1.ReadSession.TableReadOptions;
 import com.google.cloud.bigquery.storage.v1.ReadStream;
 import com.google.common.collect.ImmutableList;
-import java.time.ZoneId;
+import java.time.*;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -683,4 +683,6 @@ public class BigQueryUtilTest {
     assertThat(adjustedField.getSubFields().get(0).getType())
         .isEqualTo(LegacySQLTypeName.BIGNUMERIC);
   }
+
+
 }
