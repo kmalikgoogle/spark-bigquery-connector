@@ -24,6 +24,7 @@ import com.google.cloud.bigquery.Clustering;
 import com.google.cloud.bigquery.ExternalTableDefinition;
 import com.google.cloud.bigquery.Field;
 import com.google.cloud.bigquery.Field.Mode;
+import com.google.cloud.bigquery.FieldList;
 import com.google.cloud.bigquery.FormatOptions;
 import com.google.cloud.bigquery.HivePartitioningOptions;
 import com.google.cloud.bigquery.LegacySQLTypeName;
@@ -241,30 +242,6 @@ public class BigQueryUtilTest {
     Field f1 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setMaxLength(1L).build();
     Field f2 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setMaxLength(2L).build();
     Field f3 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setMaxLength(3L).build();
-    Field f4 = Field.newBuilder("foo", StandardSQLTypeName.INT64).build();
-    assertThat(BigQueryUtil.fieldWritable(f1, f2, true)).isTrue();
-    assertThat(BigQueryUtil.fieldWritable(f3, f2, true)).isFalse();
-    assertThat(BigQueryUtil.fieldWritable(f3, f4, true)).isFalse();
-    assertThat(BigQueryUtil.fieldWritable(f4, f2, true)).isFalse();
-  }
-
-  @Test
-  public void testFieldWritableScale() {
-    Field f1 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setScale(1L).build();
-    Field f2 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setScale(2L).build();
-    Field f3 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setScale(3L).build();
-    Field f4 = Field.newBuilder("foo", StandardSQLTypeName.INT64).build();
-    assertThat(BigQueryUtil.fieldWritable(f1, f2, true)).isTrue();
-    assertThat(BigQueryUtil.fieldWritable(f3, f2, true)).isFalse();
-    assertThat(BigQueryUtil.fieldWritable(f3, f4, true)).isFalse();
-    assertThat(BigQueryUtil.fieldWritable(f4, f2, true)).isFalse();
-  }
-
-  @Test
-  public void testFieldWritablePrecision() {
-    Field f1 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setPrecision(1L).build();
-    Field f2 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setPrecision(2L).build();
-    Field f3 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setPrecision(3L).build();
     Field f4 = Field.newBuilder("foo", StandardSQLTypeName.INT64).build();
     assertThat(BigQueryUtil.fieldWritable(f1, f2, true)).isTrue();
     assertThat(BigQueryUtil.fieldWritable(f3, f2, true)).isFalse();
@@ -538,5 +515,124 @@ public class BigQueryUtilTest {
     // Jerusalem in DST is GMT-3
     long expectedTimestamp = 1585847723123456L - (3L * 60L * 60L) * 1_000_000L; // IST adjusted
     assertThat(convertedTimestamp).isEqualTo(expectedTimestamp);
+  }
+
+  @Test
+  public void testGetPrecision() throws Exception {
+    assertThat(
+            BigQueryUtil.getPrecision(
+                Field.newBuilder("foo", StandardSQLTypeName.NUMERIC).setPrecision(5L).build()))
+        .isEqualTo(5);
+    assertThat(
+            BigQueryUtil.getPrecision(Field.newBuilder("foo", StandardSQLTypeName.NUMERIC).build()))
+        .isEqualTo(38);
+    assertThat(
+            BigQueryUtil.getPrecision(
+                Field.newBuilder("foo", StandardSQLTypeName.BIGNUMERIC).build()))
+        .isEqualTo(76);
+    assertThat(BigQueryUtil.getPrecision(Field.newBuilder("foo", StandardSQLTypeName.BOOL).build()))
+        .isEqualTo(-1);
+  }
+
+  @Test
+  public void testGetScale() throws Exception {
+    assertThat(
+            BigQueryUtil.getScale(
+                Field.newBuilder("foo", StandardSQLTypeName.NUMERIC).setScale(5L).build()))
+        .isEqualTo(5);
+    assertThat(BigQueryUtil.getScale(Field.newBuilder("foo", StandardSQLTypeName.NUMERIC).build()))
+        .isEqualTo(9);
+    assertThat(
+            BigQueryUtil.getScale(Field.newBuilder("foo", StandardSQLTypeName.BIGNUMERIC).build()))
+        .isEqualTo(38);
+    assertThat(BigQueryUtil.getScale(Field.newBuilder("foo", StandardSQLTypeName.BOOL).build()))
+        .isEqualTo(-1);
+  }
+
+  @Test
+  public void testAdjustSchemaIfNeeded() {
+    Schema wantedSchema =
+        Schema.of(
+            Field.of("numeric", LegacySQLTypeName.NUMERIC),
+            Field.of(
+                "record",
+                LegacySQLTypeName.RECORD,
+                Field.of("subfield", LegacySQLTypeName.STRING)));
+    Schema existingTableSchema =
+        Schema.of(
+            Field.of("numeric", LegacySQLTypeName.BIGNUMERIC),
+            Field.of(
+                "record",
+                LegacySQLTypeName.RECORD,
+                Field.of("subfield", LegacySQLTypeName.STRING)));
+    Schema adjustedSchema = BigQueryUtil.adjustSchemaIfNeeded(wantedSchema, existingTableSchema);
+    assertThat(adjustedSchema.getFields()).hasSize(2);
+    FieldList adjustedFields = adjustedSchema.getFields();
+    assertThat(adjustedFields.get("numeric").getType()).isEqualTo(LegacySQLTypeName.BIGNUMERIC);
+    assertThat(adjustedFields.get("record").getType()).isEqualTo(LegacySQLTypeName.RECORD);
+    assertThat(adjustedFields.get("record").getSubFields()).hasSize(1);
+    assertThat(adjustedFields.get("record").getSubFields().get(0).getType())
+        .isEqualTo(LegacySQLTypeName.STRING);
+  }
+
+  @Test
+  public void testAdjustSchemaForNewField() {
+    Schema wantedSchema =
+        Schema.of(
+            Field.of("existing_field", LegacySQLTypeName.NUMERIC),
+            Field.of("new_field", LegacySQLTypeName.STRING));
+    Schema existingTableSchema =
+        Schema.of(Field.of("existing_field", LegacySQLTypeName.BIGNUMERIC));
+    Schema adjustedSchema = BigQueryUtil.adjustSchemaIfNeeded(wantedSchema, existingTableSchema);
+    assertThat(adjustedSchema.getFields()).hasSize(2);
+    FieldList adjustedFields = adjustedSchema.getFields();
+    assertThat(adjustedFields.get("existing_field").getType())
+        .isEqualTo(LegacySQLTypeName.BIGNUMERIC);
+    assertThat(adjustedFields.get("new_field").getType()).isEqualTo(LegacySQLTypeName.STRING);
+  }
+
+  @Test
+  public void testAdjustField_no_op() {
+    Field field = Field.of("f", LegacySQLTypeName.BOOLEAN);
+    Field existingField = Field.of("f", LegacySQLTypeName.BIGNUMERIC);
+    Field adjustedField = BigQueryUtil.adjustField(field, existingField);
+    assertThat(adjustedField.getType()).isEqualTo(LegacySQLTypeName.BOOLEAN);
+  }
+
+  @Test
+  public void testAdjustField_numeric_to_big_numeric() {
+    Field field = Field.of("numeric", LegacySQLTypeName.NUMERIC);
+    Field existingField = Field.of("numeric", LegacySQLTypeName.BIGNUMERIC);
+    Field adjustedField = BigQueryUtil.adjustField(field, existingField);
+    assertThat(adjustedField.getType()).isEqualTo(LegacySQLTypeName.BIGNUMERIC);
+  }
+
+  @Test
+  public void testAdjustFieldRecursive() {
+    Field field =
+        Field.of(
+            "record", LegacySQLTypeName.RECORD, Field.of("subfield", LegacySQLTypeName.STRING));
+    Field existingField =
+        Field.of(
+            "record", LegacySQLTypeName.RECORD, Field.of("subfield", LegacySQLTypeName.STRING));
+    Field adjustedField = BigQueryUtil.adjustField(field, existingField);
+    assertThat(adjustedField.getType()).isEqualTo(LegacySQLTypeName.RECORD);
+    assertThat(adjustedField.getSubFields()).hasSize(1);
+    assertThat(adjustedField.getSubFields().get(0).getType()).isEqualTo(LegacySQLTypeName.STRING);
+  }
+
+  @Test
+  public void testAdjustFieldRecursive_with_bignumeric_conversion() {
+    Field field =
+        Field.of(
+            "record", LegacySQLTypeName.RECORD, Field.of("subfield", LegacySQLTypeName.NUMERIC));
+    Field existingField =
+        Field.of(
+            "record", LegacySQLTypeName.RECORD, Field.of("subfield", LegacySQLTypeName.BIGNUMERIC));
+    Field adjustedField = BigQueryUtil.adjustField(field, existingField);
+    assertThat(adjustedField.getType()).isEqualTo(LegacySQLTypeName.RECORD);
+    assertThat(adjustedField.getSubFields()).hasSize(1);
+    assertThat(adjustedField.getSubFields().get(0).getType())
+        .isEqualTo(LegacySQLTypeName.BIGNUMERIC);
   }
 }
