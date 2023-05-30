@@ -484,8 +484,8 @@ public class BigQueryUtil {
     Instant i = Instant.ofEpochSecond(epochSeconds, epochMicros * 1000);
     ZonedDateTime zonedDateTime = i.atZone(zone);
     ZoneOffset offset = zonedDateTime.getOffset();
-    long timestampNew=zonedDateTime.toInstant().toEpochMilli();
-    long zoneSeconds=zonedDateTime.toEpochSecond();
+    long timestampNew = zonedDateTime.toInstant().toEpochMilli();
+    long zoneSeconds = zonedDateTime.toEpochSecond();
     return (epochSeconds + offset.getTotalSeconds()) * 1_000_000 + epochMicros;
     // return (zonedDateTime.toEpochSecond()) * 1_000_000 + epochMicros;
   }
@@ -565,5 +565,22 @@ public class BigQueryUtil {
     }
     // no adjustment
     return field;
+  }
+
+  public static long adjustUTCTimeToLocalZoneTime(String dateTimeString) {
+    ZonedDateTime zonedDateTimeAdjusted =
+        LocalDateTime.parse(dateTimeString).atZone(ZoneId.systemDefault());
+    long epochMicros = zonedDateTimeAdjusted.getNano() / 1000;
+    long epochSeconds = zonedDateTimeAdjusted.toEpochSecond();
+    return (epochSeconds) * 1_000_000 + epochMicros;
+  }
+
+  public static long adjustUTCTimeToLocalZoneTime(long timestamp) {
+    long epochSeconds = timestamp / 1_000_000;
+    long epochMicros = timestamp % 1_000_000;
+    Instant i = Instant.ofEpochSecond(epochSeconds, epochMicros * 1000);
+    ZonedDateTime zonedDateTime = i.atZone(ZoneId.systemDefault());
+    ZoneOffset offset = zonedDateTime.getOffset();
+    return (epochSeconds - offset.getTotalSeconds()) * 1_000_000 + epochMicros;
   }
 }
