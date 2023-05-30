@@ -484,9 +484,10 @@ public class BigQueryUtil {
     Instant i = Instant.ofEpochSecond(epochSeconds, epochMicros * 1000);
     ZonedDateTime zonedDateTime = i.atZone(zone);
     ZoneOffset offset = zonedDateTime.getOffset();
-    long timestampNew = zonedDateTime.toInstant().toEpochMilli();
-    long zoneSeconds = zonedDateTime.toEpochSecond();
+    long timestampNew=zonedDateTime.toInstant().toEpochMilli();
+    long zoneSeconds=zonedDateTime.toEpochSecond();
     return (epochSeconds + offset.getTotalSeconds()) * 1_000_000 + epochMicros;
+    // return (zonedDateTime.toEpochSecond()) * 1_000_000 + epochMicros;
   }
 
   public static long convertUtcTimestampToTimeZone(String dateTimeString, ZoneId zone) {
