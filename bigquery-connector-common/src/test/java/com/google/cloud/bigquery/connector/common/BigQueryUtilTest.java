@@ -41,10 +41,7 @@ import com.google.cloud.bigquery.storage.v1.ReadSession.TableReadOptions;
 import com.google.cloud.bigquery.storage.v1.ReadStream;
 import com.google.common.collect.ImmutableList;
 import java.time.*;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.junit.Test;
@@ -251,6 +248,30 @@ public class BigQueryUtilTest {
     assertThat(BigQueryUtil.fieldWritable(f3, f4, true)).isFalse();
     assertThat(BigQueryUtil.fieldWritable(f4, f2, true)).isFalse();
   }
+
+  /* @Test
+  public void testFieldWritableScale() {
+    Field f1 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setScale(1L).build();
+    Field f2 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setScale(2L).build();
+    Field f3 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setScale(3L).build();
+    Field f4 = Field.newBuilder("foo", StandardSQLTypeName.INT64).build();
+    assertThat(BigQueryUtil.fieldWritable(f1, f2, true)).isTrue();
+    assertThat(BigQueryUtil.fieldWritable(f3, f2, true)).isFalse();
+    assertThat(BigQueryUtil.fieldWritable(f3, f4, true)).isFalse();
+    assertThat(BigQueryUtil.fieldWritable(f4, f2, true)).isFalse();
+  }
+
+  @Test
+  public void testFieldWritablePrecision() {
+    Field f1 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setPrecision(1L).build();
+    Field f2 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setPrecision(2L).build();
+    Field f3 = Field.newBuilder("foo", StandardSQLTypeName.INT64).setPrecision(3L).build();
+    Field f4 = Field.newBuilder("foo", StandardSQLTypeName.INT64).build();
+    assertThat(BigQueryUtil.fieldWritable(f1, f2, true)).isTrue();
+    assertThat(BigQueryUtil.fieldWritable(f3, f2, true)).isFalse();
+    assertThat(BigQueryUtil.fieldWritable(f3, f4, true)).isFalse();
+    assertThat(BigQueryUtil.fieldWritable(f4, f2, true)).isFalse();
+  }*/
 
   @Test
   public void testSchemaWritableWithEnableModeCheckForSchemaFields() {
@@ -467,7 +488,7 @@ public class BigQueryUtilTest {
   }
 
   @Test
-  public void ttestGetClusteringFields_no_clustering() {
+  public void testGetClusteringFields_no_clustering() {
     TableInfo info =
         TableInfo.of(TableId.of("foo", "bar"), StandardTableDefinition.newBuilder().build());
     assertThat(BigQueryUtil.getClusteringFields(info)).isEmpty();
@@ -506,66 +527,6 @@ public class BigQueryUtilTest {
   }
 
   @Test
-  public void testConvertUtcTimestampToTimeZone_withDST() {
-    long timestamp = 1585847723123456L; // 2020-04-02T17:15:23.123456
-    long convertedTimestamp =
-        BigQueryUtil.convertUtcTimestampToTimeZone(timestamp, ZoneId.of("Asia/Jerusalem"));
-    // Jerusalem in DST is GMT-3
-    long expectedTimestamp = timestamp + 3L * 60L * 60L * 1_000_000L;
-    assertThat(convertedTimestamp).isEqualTo(expectedTimestamp);
-  }
-
-  @Test
-  public void testConvertUtcTZTimestampToTimeZone_withDST() {
-    String timestamp = "2020-04-02T17:15:23.123456"; // 1585847723123456L
-    long convertedTimestamp =
-        BigQueryUtil.convertUtcTimestampToTimeZone(timestamp, ZoneId.of("Asia/Jerusalem"));
-    // Jerusalem in DST is GMT-3
-    long expectedTimestamp = 1585847723123456L + 3L * 60L * 60L * 1_000_000L;
-    assertThat(convertedTimestamp).isEqualTo(expectedTimestamp);
-  }
-
-  @Test
-  public void testDoNotConvertUtcTZTimestampToTimeZone_withUTC() {
-    String timestamp = "2020-04-02T17:15:23.123456"; // 1585847723123456L
-    long convertedTimestamp =
-        BigQueryUtil.convertUtcTimestampToTimeZone(timestamp, ZoneId.of("UTC"));
-    long expectedTimestamp = 1585847723123456L;
-    assertThat(convertedTimestamp).isEqualTo(expectedTimestamp);
-  }
-
-  @Test
-  public void testConvertDoNotUtcTimestampToTimeZone_withUTC() {
-    long timestamp = 1585847723123456L; // 2020-04-02T17:15:23.123456
-    long convertedTimestamp =
-        BigQueryUtil.convertUtcTimestampToTimeZone(timestamp, ZoneId.of("UTC"));
-    // Jerusalem in DST is GMT-3
-    long expectedTimestamp = timestamp;
-    assertThat(convertedTimestamp).isEqualTo(expectedTimestamp);
-  }
-
-  @Test
-  public void testAdjustUTCTimeToLocalZoneTime() {
-    String timestamp = "2020-04-02T17:15:23.123456"; // 1585847723123456L
-    TimeZone.setDefault(TimeZone.getTimeZone("Asia/Jerusalem")); // +03:00 offset
-    long convertedTimestamp = BigQueryUtil.adjustUTCTimeToLocalZoneTime(timestamp);
-    // Jerusalem in DST is GMT-3
-    long expectedTimestamp = 1585847723123456L - (3L * 60L * 60L) * 1_000_000L; // IST adjusted
-    assertThat(convertedTimestamp).isEqualTo(expectedTimestamp);
-  }
-
-  @Test
-  public void testAdjustUTCTimeToLocalZoneTimeLong() {
-    // String timestamp = "2020-04-02T17:15:23.123456"; // 1585847723123456L
-    long timestamp = 1585847723123456L;
-    TimeZone.setDefault(TimeZone.getTimeZone("Asia/Jerusalem")); // +03:00 offset
-    long convertedTimestamp = BigQueryUtil.adjustUTCTimeToLocalZoneTime(timestamp);
-    // Jerusalem in DST is GMT-3
-    long expectedTimestamp = 1585847723123456L - (3L * 60L * 60L) * 1_000_000L; // IST adjusted
-    assertThat(convertedTimestamp).isEqualTo(expectedTimestamp);
-  }
-
-  @Test
   public void testGetPrecision() throws Exception {
     assertThat(
             BigQueryUtil.getPrecision(
@@ -595,32 +556,6 @@ public class BigQueryUtilTest {
         .isEqualTo(38);
     assertThat(BigQueryUtil.getScale(Field.newBuilder("foo", StandardSQLTypeName.BOOL).build()))
         .isEqualTo(-1);
-  }
-
-  @Test
-  public void testAdjustSchemaIfNeeded() {
-    Schema wantedSchema =
-        Schema.of(
-            Field.of("numeric", LegacySQLTypeName.NUMERIC),
-            Field.of(
-                "record",
-                LegacySQLTypeName.RECORD,
-                Field.of("subfield", LegacySQLTypeName.STRING)));
-    Schema existingTableSchema =
-        Schema.of(
-            Field.of("numeric", LegacySQLTypeName.BIGNUMERIC),
-            Field.of(
-                "record",
-                LegacySQLTypeName.RECORD,
-                Field.of("subfield", LegacySQLTypeName.STRING)));
-    Schema adjustedSchema = BigQueryUtil.adjustSchemaIfNeeded(wantedSchema, existingTableSchema);
-    assertThat(adjustedSchema.getFields()).hasSize(2);
-    FieldList adjustedFields = adjustedSchema.getFields();
-    assertThat(adjustedFields.get("numeric").getType()).isEqualTo(LegacySQLTypeName.BIGNUMERIC);
-    assertThat(adjustedFields.get("record").getType()).isEqualTo(LegacySQLTypeName.RECORD);
-    assertThat(adjustedFields.get("record").getSubFields()).hasSize(1);
-    assertThat(adjustedFields.get("record").getSubFields().get(0).getType())
-        .isEqualTo(LegacySQLTypeName.STRING);
   }
 
   @Test
@@ -684,6 +619,15 @@ public class BigQueryUtilTest {
         .isEqualTo(LegacySQLTypeName.BIGNUMERIC);
   }
 
+  @Test
+  public void testConvertUtcTimestampToTimeZone_withDST() {
+    long timestamp = 1585847723123456L; // 2020-04-02T17:15:23.123456
+    long convertedTimestamp =
+        BigQueryUtil.convertUtcTimestampToTimeZone(timestamp, ZoneId.of("Asia/Jerusalem"));
+    // Jerusalem in DST is GMT-3
+    long expectedTimestamp = timestamp + 3L * 60L * 60L * 1_000_000L;
+    assertThat(convertedTimestamp).isEqualTo(expectedTimestamp);
+  }
 
   @Test
   public void testConvertUtcTZTimestampToTimeZone_withDST() {
@@ -693,6 +637,53 @@ public class BigQueryUtilTest {
     // Jerusalem in DST is GMT-3
     long expectedTimestamp = 1585847723123456L + 3L * 60L * 60L * 1_000_000L;
     assertThat(convertedTimestamp).isEqualTo(expectedTimestamp);
+  }
+
+  @Test
+  public void testAdjustUTCTimeToLocalZoneTime() {
+    String timestamp = "2020-04-02T17:15:23.123456"; // 1585847723123456L
+    TimeZone.setDefault(TimeZone.getTimeZone("Asia/Jerusalem")); // +03:00 offset
+    long convertedTimestamp = BigQueryUtil.adjustUTCTimeToLocalZoneTime(timestamp);
+    // Jerusalem in DST is GMT-3
+    long expectedTimestamp = 1585847723123456L - (3L * 60L * 60L) * 1_000_000L; // IST adjusted
+    assertThat(convertedTimestamp).isEqualTo(expectedTimestamp);
+  }
+
+  @Test
+  public void testAdjustUTCTimeToLocalZoneTimeLong() {
+    // String timestamp = "2020-04-02T17:15:23.123456"; // 1585847723123456L
+    long timestamp = 1585847723123456L;
+    TimeZone.setDefault(TimeZone.getTimeZone("Asia/Jerusalem")); // +03:00 offset
+    long convertedTimestamp = BigQueryUtil.adjustUTCTimeToLocalZoneTime(timestamp);
+    // Jerusalem in DST is GMT-3
+    long expectedTimestamp = 1585847723123456L - (3L * 60L * 60L) * 1_000_000L; // IST adjusted
+    assertThat(convertedTimestamp).isEqualTo(expectedTimestamp);
+  }
+
+  @Test
+  public void testAdjustSchemaIfNeeded() {
+    Schema wantedSchema =
+        Schema.of(
+            Field.of("numeric", LegacySQLTypeName.NUMERIC),
+            Field.of(
+                "record",
+                LegacySQLTypeName.RECORD,
+                Field.of("subfield", LegacySQLTypeName.STRING)));
+    Schema existingTableSchema =
+        Schema.of(
+            Field.of("numeric", LegacySQLTypeName.BIGNUMERIC),
+            Field.of(
+                "record",
+                LegacySQLTypeName.RECORD,
+                Field.of("subfield", LegacySQLTypeName.STRING)));
+    Schema adjustedSchema = BigQueryUtil.adjustSchemaIfNeeded(wantedSchema, existingTableSchema);
+    assertThat(adjustedSchema.getFields()).hasSize(2);
+    FieldList adjustedFields = adjustedSchema.getFields();
+    assertThat(adjustedFields.get("numeric").getType()).isEqualTo(LegacySQLTypeName.BIGNUMERIC);
+    assertThat(adjustedFields.get("record").getType()).isEqualTo(LegacySQLTypeName.RECORD);
+    assertThat(adjustedFields.get("record").getSubFields()).hasSize(1);
+    assertThat(adjustedFields.get("record").getSubFields().get(0).getType())
+        .isEqualTo(LegacySQLTypeName.STRING);
   }
 
   @Test
@@ -711,27 +702,6 @@ public class BigQueryUtilTest {
         BigQueryUtil.convertUtcTimestampToTimeZone(timestamp, ZoneId.of("UTC"));
     // Jerusalem in DST is GMT-3
     long expectedTimestamp = timestamp;
-    assertThat(convertedTimestamp).isEqualTo(expectedTimestamp);
-  }
-
-  @Test
-  public void testAdjustUTCTimeToLocalZoneTime() {
-    String timestamp = "2020-04-02T17:15:23.123456"; // 1585847723123456L
-    long convertedTimestamp = BigQueryUtil.adjustUTCTimeToLocalZoneTime(timestamp);
-    // Jerusalem in DST is GMT-3
-    long expectedTimestamp =
-        1585847723123456L - (5L * 60L * 60L + 30L * 60L) * 1_000_000L; // IST adjusted
-    assertThat(convertedTimestamp).isEqualTo(expectedTimestamp);
-  }
-
-  @Test
-  public void testAdjustUTCTimeToLocalZoneTimeLong() {
-    // String timestamp = "2020-04-02T17:15:23.123456"; // 1585847723123456L
-    long timestamp = 1585847723123456L;
-    long convertedTimestamp = BigQueryUtil.adjustUTCTimeToLocalZoneTime(timestamp);
-    // Jerusalem in DST is GMT-3
-    long expectedTimestamp =
-        1585847723123456L - (5L * 60L * 60L + 30L * 60L) * 1_000_000L; // IST adjusted
     assertThat(convertedTimestamp).isEqualTo(expectedTimestamp);
   }
 }

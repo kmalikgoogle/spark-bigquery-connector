@@ -155,11 +155,6 @@ abstract class WriteIntegrationTestBase extends SparkBigQueryIntegrationTestBase
     return (int) bq.query(QueryJobConfiguration.of(query)).getTotalRows();
   }
 
-  protected int testTableNumberOfRows(String tableName) throws InterruptedException {
-    String query = String.format("select * from %s.%s", testDataset.toString(), tableName);
-    return (int) bq.query(QueryJobConfiguration.of(query)).getTotalRows();
-  }
-
   private StandardTableDefinition testPartitionedTableDefinition() {
     return bq.getTable(testDataset.toString(), testTable + "_partitioned").getDefinition();
   }
