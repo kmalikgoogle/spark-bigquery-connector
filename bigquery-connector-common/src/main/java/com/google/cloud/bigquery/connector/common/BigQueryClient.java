@@ -22,6 +22,7 @@ import com.google.cloud.bigquery.BigQueryException;
 import com.google.cloud.bigquery.Clustering;
 import com.google.cloud.bigquery.Dataset;
 import com.google.cloud.bigquery.DatasetId;
+import com.google.cloud.bigquery.EncryptionConfiguration;
 import com.google.cloud.bigquery.FormatOptions;
 import com.google.cloud.bigquery.Job;
 import com.google.cloud.bigquery.JobConfiguration;
@@ -141,8 +142,25 @@ public class BigQueryClient {
    * @return The {@code Table} object representing the table that was created.
    */
   public TableInfo createTable(TableId tableId, Schema schema) {
-    TableInfo tableInfo = TableInfo.newBuilder(tableId, StandardTableDefinition.of(schema)).build();
-    return bigQuery.create(tableInfo);
+    return createTable(tableId, schema, Optional.empty());
+  }
+
+  /**
+   * Creates an empty table in BigQuery.
+   *
+   * @param tableId The TableId of the table to be created.
+   * @param schema The Schema of the table to be created.
+   * @param destinationTableKmsKeyName The reference to the encryption key in KMS.
+   * @return The {@code Table} object representing the table that was created.
+   */
+  public TableInfo createTable(
+      TableId tableId, Schema schema, Optional<String> destinationTableKmsKeyName) {
+    TableInfo.Builder tableInfo = TableInfo.newBuilder(tableId, StandardTableDefinition.of(schema));
+    destinationTableKmsKeyName.ifPresent(
+        keyName ->
+            tableInfo.setEncryptionConfiguration(
+                EncryptionConfiguration.newBuilder().setKmsKeyName(keyName).build()));
+    return bigQuery.create(tableInfo.build());
   }
 
   /**
@@ -330,16 +348,28 @@ public class BigQueryClient {
   public Job createAndWaitFor(JobConfiguration jobConfiguration) {
     JobInfo jobInfo = JobInfo.of(jobConfiguration);
     Job job = bigQuery.create(jobInfo);
+    Job returnedJob = null;
 
     log.info("Submitted job {}. jobId: {}", jobConfiguration, job.getJobId());
-    // TODO(davidrab): add retry options
     try {
-      return job.waitFor();
+      Job completedJob = job.waitFor();
+      if (completedJob == null) {
+        throw new BigQueryException(
+            BaseHttpServiceException.UNKNOWN_CODE,
+            String.format("Failed to run the job [%s], got null back", job));
+      }
+      if (completedJob.getStatus().getError() != null) {
+        throw new BigQueryException(
+            BaseHttpServiceException.UNKNOWN_CODE,
+            String.format(
+                "Failed to run the job [%s], due to '%s'", completedJob.getStatus().getError()));
+      }
+      return completedJob;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new BigQueryException(
           BaseHttpServiceException.UNKNOWN_CODE,
-          String.format("Failed to run the job [%s]", job),
+          String.format("Failed to run the job [%s], task was interrupted", job),
           e);
     }
   }
@@ -566,6 +596,15 @@ public class BigQueryClient {
       jobConfiguration.setSchemaUpdateOptions(options.getLoadSchemaUpdateOptions());
     }
 
+    options
+        .getKmsKeyName()
+        .ifPresent(
+            destinationTableKmsKeyName ->
+                jobConfiguration.setDestinationEncryptionConfiguration(
+                    EncryptionConfiguration.newBuilder()
+                        .setKmsKeyName(destinationTableKmsKeyName)
+                        .build()));
+
     Job finishedJob = null;
     try {
       finishedJob = createAndWaitFor(jobConfiguration);
@@ -659,6 +698,8 @@ public class BigQueryClient {
     List<JobInfo.SchemaUpdateOption> getLoadSchemaUpdateOptions();
 
     boolean getEnableModeCheckForSchemaFields();
+
+    Optional<String> getKmsKeyName();
   }
 
   static class DestinationTableBuilder implements Callable<TableInfo> {

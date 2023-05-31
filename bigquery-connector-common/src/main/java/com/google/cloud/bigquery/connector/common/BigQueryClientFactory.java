@@ -17,6 +17,7 @@ package com.google.cloud.bigquery.connector.common;
 
 import com.google.api.core.ApiFunction;
 import com.google.api.gax.core.FixedCredentialsProvider;
+import com.google.api.gax.grpc.ChannelPoolSettings;
 import com.google.api.gax.grpc.InstantiatingGrpcChannelProvider;
 import com.google.api.gax.rpc.HeaderProvider;
 import com.google.api.gax.rpc.UnaryCallSettings;
@@ -76,6 +77,7 @@ public class BigQueryClientFactory implements Serializable {
         BigQueryReadClient bigQueryReadClient =
             createBigQueryReadClient(
                 this.bqConfig.getBigQueryStorageGrpcEndpoint(),
+                this.bqConfig.getChannelPoolSize(),
                 this.bqConfig.getFlowControlWindowBytes());
         Runtime.getRuntime()
             .addShutdownHook(new Thread(() -> shutdownBigQueryReadClient(bigQueryReadClient)));
@@ -110,10 +112,12 @@ public class BigQueryClientFactory implements Serializable {
     // ExternalAccountCredentials first and then compare their hashCodes.
     if (credentials instanceof ExternalAccountCredentials) {
       return Objects.hashCode(
-          BigQueryUtil.getCredentialsByteArray(credentials), headerProvider, bqConfig);
+          BigQueryUtil.getCredentialsByteArray(credentials),
+          headerProvider,
+          bqConfig.getClientCreationHashCode());
     }
 
-    return Objects.hashCode(credentials, headerProvider, bqConfig);
+    return Objects.hashCode(credentials, headerProvider, bqConfig.getClientCreationHashCode());
   }
 
   @Override
@@ -128,9 +132,7 @@ public class BigQueryClientFactory implements Serializable {
     BigQueryClientFactory that = (BigQueryClientFactory) o;
 
     if (Objects.equal(headerProvider, that.headerProvider)
-        && Objects.equal(
-            new BigQueryClientFactoryConfig(bqConfig),
-            new BigQueryClientFactoryConfig(that.bqConfig))) {
+        && bqConfig.areClientCreationConfigsEqual(that.bqConfig)) {
       // Here, credentials and that.credentials are instances of GoogleCredentials which can be one
       // of GoogleCredentials, UserCredentials, ServiceAccountCredentials,
       // ExternalAccountCredentials or ImpersonatedCredentials (See the class
@@ -145,9 +147,11 @@ public class BigQueryClientFactory implements Serializable {
   }
 
   private BigQueryReadClient createBigQueryReadClient(
-      Optional<String> endpoint, Optional<Integer> flowControlWindow) {
+      Optional<String> endpoint, int channelPoolSize, Optional<Integer> flowControlWindow) {
     try {
       InstantiatingGrpcChannelProvider.Builder transportBuilder = createTransportBuilder(endpoint);
+      log.info("Channel pool size set to {}", channelPoolSize);
+      transportBuilder.setChannelPoolSettings(ChannelPoolSettings.staticallySized(channelPoolSize));
       if (flowControlWindow.isPresent()) {
         ApiFunction<ManagedChannelBuilder, ManagedChannelBuilder> channelConfigurator =
             (ManagedChannelBuilder channelBuilder) -> {

@@ -17,8 +17,11 @@ package com.google.cloud.bigquery.connector.common;
 
 import com.google.api.gax.retrying.RetrySettings;
 import com.google.cloud.bigquery.QueryJobConfiguration.Priority;
+import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 public interface BigQueryConfig {
 
@@ -31,6 +34,16 @@ public interface BigQueryConfig {
   Optional<String> getCredentialsFile();
 
   Optional<String> getAccessToken();
+
+  String getLoggedInUserName();
+
+  Set<String> getLoggedInUserGroups();
+
+  Optional<Map<String, String>> getImpersonationServiceAccountsForUsers();
+
+  Optional<Map<String, String>> getImpersonationServiceAccountsForGroups();
+
+  Optional<String> getImpersonationServiceAccount();
 
   String getParentProjectId();
 
@@ -60,9 +73,47 @@ public interface BigQueryConfig {
 
   Optional<Long> getCreateReadSessionTimeoutInSeconds();
 
+  int getChannelPoolSize();
+
   // Get a static flow control window per RPC. When not set
   // auto flow control is determined by Bandwidth Delay Product.
   Optional<Integer> getFlowControlWindowBytes();
 
   Priority getQueryJobPriority();
+
+  default int getClientCreationHashCode() {
+    return Objects.hashCode(
+        getAccessTokenProviderFQCN(),
+        getAccessTokenProviderConfig(),
+        getCredentialsKey(),
+        getAccessToken(),
+        getCredentialsFile(),
+        getBigQueryHttpEndpoint(),
+        getFlowControlWindowBytes(),
+        getBigQueryStorageGrpcEndpoint(),
+        getCreateReadSessionTimeoutInSeconds(),
+        getBigQueryProxyConfig(),
+        getParentProjectId(),
+        useParentProjectForMetadataOperations());
+  }
+
+  default boolean areClientCreationConfigsEqual(BigQueryConfig b) {
+    if (this == b) {
+      return true;
+    }
+    return Objects.equal(getAccessTokenProviderFQCN(), b.getAccessTokenProviderFQCN())
+        && Objects.equal(getAccessTokenProviderConfig(), b.getAccessTokenProviderConfig())
+        && Objects.equal(getCredentialsKey(), b.getCredentialsKey())
+        && Objects.equal(getAccessToken(), b.getAccessToken())
+        && Objects.equal(getCredentialsFile(), b.getCredentialsFile())
+        && Objects.equal(getBigQueryHttpEndpoint(), b.getBigQueryHttpEndpoint())
+        && Objects.equal(getFlowControlWindowBytes(), b.getFlowControlWindowBytes())
+        && Objects.equal(getBigQueryStorageGrpcEndpoint(), b.getBigQueryStorageGrpcEndpoint())
+        && Objects.equal(
+            getCreateReadSessionTimeoutInSeconds(), b.getCreateReadSessionTimeoutInSeconds())
+        && Objects.equal(getBigQueryProxyConfig(), b.getBigQueryProxyConfig())
+        && Objects.equal(getParentProjectId(), b.getParentProjectId())
+        && Objects.equal(
+            useParentProjectForMetadataOperations(), b.useParentProjectForMetadataOperations());
+  }
 }

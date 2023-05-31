@@ -21,9 +21,11 @@ import static com.google.cloud.bigquery.connector.common.BigQueryConfigurationUt
 import static com.google.cloud.bigquery.connector.common.BigQueryConfigurationUtil.fromJavaUtil;
 import static com.google.cloud.bigquery.connector.common.BigQueryConfigurationUtil.getAnyBooleanOption;
 import static com.google.cloud.bigquery.connector.common.BigQueryConfigurationUtil.getAnyOption;
+import static com.google.cloud.bigquery.connector.common.BigQueryConfigurationUtil.getAnyOptionsWithPrefix;
 import static com.google.cloud.bigquery.connector.common.BigQueryConfigurationUtil.getOption;
 import static com.google.cloud.bigquery.connector.common.BigQueryConfigurationUtil.getOptionFromMultipleParams;
 import static com.google.cloud.bigquery.connector.common.BigQueryConfigurationUtil.getRequiredOption;
+import static com.google.cloud.bigquery.connector.common.BigQueryConfigurationUtil.removePrefixFromMapKeys;
 import static com.google.cloud.bigquery.connector.common.BigQueryUtil.firstPresent;
 import static com.google.cloud.bigquery.connector.common.BigQueryUtil.parseTableId;
 import static com.google.cloud.spark.bigquery.SparkBigQueryUtil.scalaMapToJavaMap;
@@ -40,6 +42,7 @@ import com.google.cloud.bigquery.TableId;
 import com.google.cloud.bigquery.TimePartitioning;
 import com.google.cloud.bigquery.connector.common.BigQueryClient;
 import com.google.cloud.bigquery.connector.common.BigQueryConfig;
+import com.google.cloud.bigquery.connector.common.BigQueryConnectorException;
 import com.google.cloud.bigquery.connector.common.BigQueryCredentialsSupplier;
 import com.google.cloud.bigquery.connector.common.BigQueryProxyConfig;
 import com.google.cloud.bigquery.connector.common.MaterializationConfiguration;
@@ -51,6 +54,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Sets;
+import java.io.IOException;
 import java.io.Serializable;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -67,6 +72,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.execution.datasources.DataSource;
 import org.apache.spark.sql.internal.SQLConf;
@@ -93,6 +99,12 @@ public class SparkBigQueryConfig
       }
     }
   }
+
+  public static final String IMPERSONATION_GLOBAL = "gcpImpersonationServiceAccount";
+  public static final String IMPERSONATION_FOR_USER_PREFIX =
+      "gcpImpersonationServiceAccountForUser.";
+  public static final String IMPERSONATION_FOR_GROUP_PREFIX =
+      "gcpImpersonationServiceAccountForGroup.";
 
   public static final String VIEWS_ENABLED_OPTION = "viewsEnabled";
   public static final String USE_AVRO_LOGICAL_TYPES_OPTION = "useAvroLogicalTypes";
@@ -140,6 +152,11 @@ public class SparkBigQueryConfig
   boolean useParentProjectForMetadataOperations;
   com.google.common.base.Optional<String> accessTokenProviderFQCN;
   com.google.common.base.Optional<String> accessTokenProviderConfig;
+  String loggedInUserName;
+  Set<String> loggedInUserGroups;
+  com.google.common.base.Optional<String> impersonationServiceAccount;
+  com.google.common.base.Optional<Map<String, String>> impersonationServiceAccountsForUsers;
+  com.google.common.base.Optional<Map<String, String>> impersonationServiceAccountsForGroups;
   com.google.common.base.Optional<String> credentialsKey;
   com.google.common.base.Optional<String> credentialsFile;
   com.google.common.base.Optional<String> accessToken;
@@ -178,6 +195,7 @@ public class SparkBigQueryConfig
   private int numBackgroundThreadsPerStream = 0;
   private int numPrebufferReadRowsResponses = MIN_BUFFERED_RESPONSES_PER_STREAM;
   private int numStreamsPerPartition = MIN_STREAMS_PER_PARTITION;
+  private int channelPoolSize = 1;
   private com.google.common.base.Optional<Integer> flowControlWindowBytes =
       com.google.common.base.Optional.absent();
   private boolean enableReadSessionCaching = false;
@@ -195,6 +213,8 @@ public class SparkBigQueryConfig
   private com.google.common.base.Optional<Long> createReadSessionTimeoutInSeconds;
   private ZoneId datetimeZoneId;
   private QueryJobConfiguration.Priority queryJobPriority = DEFAULT_JOB_PRIORITY;
+
+  private com.google.common.base.Optional<String> destinationTableKmsKeyName = empty();
 
   @VisibleForTesting
   SparkBigQueryConfig() {
@@ -296,6 +316,25 @@ public class SparkBigQueryConfig
     config.accessTokenProviderFQCN = getAnyOption(globalOptions, options, "gcpAccessTokenProvider");
     config.accessTokenProviderConfig =
         getAnyOption(globalOptions, options, "gcpAccessTokenProviderConfig");
+    try {
+      UserGroupInformation ugiCurrentUser = UserGroupInformation.getCurrentUser();
+      config.loggedInUserName = ugiCurrentUser.getShortUserName();
+      config.loggedInUserGroups = Sets.newHashSet(ugiCurrentUser.getGroupNames());
+    } catch (IOException e) {
+      throw new BigQueryConnectorException(
+          "Failed to get the UserGroupInformation current user", e);
+    }
+    config.impersonationServiceAccount = getAnyOption(globalOptions, options, IMPERSONATION_GLOBAL);
+    config.impersonationServiceAccountsForUsers =
+        removePrefixFromMapKeys(
+            getAnyOptionsWithPrefix(
+                globalOptions, options, IMPERSONATION_FOR_USER_PREFIX.toLowerCase()),
+            IMPERSONATION_FOR_USER_PREFIX.toLowerCase());
+    config.impersonationServiceAccountsForGroups =
+        removePrefixFromMapKeys(
+            getAnyOptionsWithPrefix(
+                globalOptions, options, IMPERSONATION_FOR_GROUP_PREFIX.toLowerCase()),
+            IMPERSONATION_FOR_GROUP_PREFIX.toLowerCase());
     config.accessToken = getAnyOption(globalOptions, options, "gcpAccessToken");
     config.credentialsKey = getAnyOption(globalOptions, options, "credentials");
     config.credentialsFile =
@@ -317,8 +356,10 @@ public class SparkBigQueryConfig
             .transform(Integer::valueOf)
             .orNull();
     config.defaultParallelism = defaultParallelism;
-    config.temporaryGcsBucket = getAnyOption(globalOptions, options, "temporaryGcsBucket");
-    config.persistentGcsBucket = getAnyOption(globalOptions, options, "persistentGcsBucket");
+    config.temporaryGcsBucket =
+        stripPrefix(getAnyOption(globalOptions, options, "temporaryGcsBucket"));
+    config.persistentGcsBucket =
+        stripPrefix(getAnyOption(globalOptions, options, "persistentGcsBucket"));
     config.persistentGcsPath = getOption(options, "persistentGcsPath");
     WriteMethod writeMethodDefault =
         Optional.ofNullable(customDefaults.get(WRITE_METHOD_PARAM))
@@ -418,6 +459,15 @@ public class SparkBigQueryConfig
         getAnyOption(globalOptions, options, "bqNumStreamsPerPartition")
             .transform(Integer::parseInt)
             .or(MIN_STREAMS_PER_PARTITION);
+    // Calculating the default channel pool size
+    int sparkExecutorCores =
+        Integer.parseInt(globalOptions.getOrDefault("spark.executor.cores", "1"));
+    int defaultChannelPoolSize = sparkExecutorCores * config.numStreamsPerPartition;
+
+    config.channelPoolSize =
+        getAnyOption(globalOptions, options, "bqChannelPoolSize")
+            .transform(Integer::parseInt)
+            .or(defaultChannelPoolSize);
     config.enableReadSessionCaching =
         getAnyBooleanOption(globalOptions, options, "enableReadSessionCaching", false);
 
@@ -483,7 +533,23 @@ public class SparkBigQueryConfig
             .transform(Priority::valueOf)
             .or(DEFAULT_JOB_PRIORITY);
 
+    config.destinationTableKmsKeyName =
+        getAnyOption(globalOptions, options, "destinationTableKmsKeyName");
+
     return config;
+  }
+
+  // strip gs:// prefix if exists
+  private static com.google.common.base.Optional<String> stripPrefix(
+      com.google.common.base.Optional<String> bucket) {
+    return bucket.transform(
+        path -> {
+          if (path.startsWith("gs://")) {
+            return path.substring(5);
+          } else {
+            return path;
+          }
+        });
   }
 
   @VisibleForTesting
@@ -564,6 +630,11 @@ public class SparkBigQueryConfig
             accessToken.toJavaUtil(),
             credentialsKey.toJavaUtil(),
             credentialsFile.toJavaUtil(),
+            loggedInUserName,
+            loggedInUserGroups,
+            impersonationServiceAccountsForUsers.toJavaUtil(),
+            impersonationServiceAccountsForGroups.toJavaUtil(),
+            impersonationServiceAccount.toJavaUtil(),
             sparkBigQueryProxyAndHttpConfig.getProxyUri(),
             sparkBigQueryProxyAndHttpConfig.getProxyUsername(),
             sparkBigQueryProxyAndHttpConfig.getProxyPassword())
@@ -609,6 +680,31 @@ public class SparkBigQueryConfig
   @Override
   public Optional<String> getAccessTokenProviderConfig() {
     return accessTokenProviderConfig.toJavaUtil();
+  }
+
+  @Override
+  public String getLoggedInUserName() {
+    return loggedInUserName;
+  }
+
+  @Override
+  public Set<String> getLoggedInUserGroups() {
+    return loggedInUserGroups;
+  }
+
+  @Override
+  public Optional<Map<String, String>> getImpersonationServiceAccountsForUsers() {
+    return impersonationServiceAccountsForUsers.toJavaUtil();
+  }
+
+  @Override
+  public Optional<Map<String, String>> getImpersonationServiceAccountsForGroups() {
+    return impersonationServiceAccountsForGroups.toJavaUtil();
+  }
+
+  @Override
+  public Optional<String> getImpersonationServiceAccount() {
+    return impersonationServiceAccount.toJavaUtil();
   }
 
   @Override
@@ -800,6 +896,11 @@ public class SparkBigQueryConfig
   }
 
   @Override
+  public int getChannelPoolSize() {
+    return channelPoolSize;
+  }
+
+  @Override
   public Optional<Integer> getFlowControlWindowBytes() {
     return flowControlWindowBytes.toJavaUtil();
   }
@@ -807,6 +908,11 @@ public class SparkBigQueryConfig
   @Override
   public Priority getQueryJobPriority() {
     return queryJobPriority;
+  }
+
+  @Override
+  public Optional<String> getKmsKeyName() {
+    return destinationTableKmsKeyName.toJavaUtil();
   }
 
   @Override
