@@ -24,11 +24,8 @@ import com.google.auth.oauth2.ExternalAccountCredentials;
 import com.google.cloud.bigquery.BigQueryError;
 import com.google.cloud.bigquery.BigQueryException;
 import com.google.cloud.bigquery.Clustering;
-import com.google.cloud.bigquery.ExternalTableDefinition;
 import com.google.cloud.bigquery.Field;
-import com.google.cloud.bigquery.Field.Mode;
 import com.google.cloud.bigquery.FieldList;
-import com.google.cloud.bigquery.HivePartitioningOptions;
 import com.google.cloud.bigquery.LegacySQLTypeName;
 import com.google.cloud.bigquery.RangePartitioning;
 import com.google.cloud.bigquery.Schema;
@@ -487,7 +484,6 @@ public class BigQueryUtil {
     long timestampNew = zonedDateTime.toInstant().toEpochMilli();
     long zoneSeconds = zonedDateTime.toEpochSecond();
     return (epochSeconds + offset.getTotalSeconds()) * 1_000_000 + epochMicros;
-    // return (zonedDateTime.toEpochSecond()) * 1_000_000 + epochMicros;
   }
 
   public static long convertUtcTimestampToTimeZone(String dateTimeString, ZoneId zone) {
